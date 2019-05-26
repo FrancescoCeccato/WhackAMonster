@@ -5,6 +5,7 @@
 #define BTN2 A1
 #define BTN3 A2
 #define BUZZ 2
+#define DELAYSHORTEST 70
 #define DELAYSHORT 100
 #define DELAYBTN 300
 #define DELAYPHASE 1000
@@ -20,6 +21,8 @@ byte noHeart[] = {B00000,B01010,B10101,B10001,B01010,B00100,B00000,B00000};
 byte halfHeart[] = {B00000,B01010,B11101,B11001,B01010,B00100,B00000,B00000};
 byte item1[] = {B00000,B01010,B10001,B01010,B00000,B10001,B01110,B00000};
 byte item2[] = {B10001,B01010,B00100,B01010,B00000,B01110,B10001,B00000};
+byte crown[] = {B00000,B00000,B10101,B11111,B11111,B11111,B00000,B00000};
+
 
 int squares[] = {5,9,13};
 int buttons[] = {BTN1,BTN2,BTN3};
@@ -33,12 +36,7 @@ double this_time;
 
 void setup() {
   Serial.begin(9600);
-  eeprom_write("AAA",1.1,0);
-  eeprom_write("BBB",1.2,1);
-  eeprom_write("CCC",1.3,2);
-  eeprom_write("DDD",1.4,3);
-  eeprom_update("XXX",1.25);
-  if(firstRun){
+  if(firstRun){ 
     pinMode(BTN1, INPUT_PULLUP);
     pinMode(BTN2, INPUT_PULLUP);
     pinMode(BTN3, INPUT_PULLUP);
@@ -47,9 +45,6 @@ void setup() {
     
     lcd.begin(16,2);
     intro();
-    set_name();
-
-
     randomSeed(analogRead(0));
     firstRun = false; 
   }
@@ -57,11 +52,16 @@ void setup() {
   attempts = 0;
   fraction = 1;
   lives = 3;
+  myName = "";
+
 }
 
 void loop() {
-  set_games();
-  while(lives>0){
+   setup();
+   set_name();
+   set_games();
+   
+   while(lives>0){
    play_game();
    attempts++;
   }
@@ -165,9 +165,14 @@ void highlights()
 {
   attempts = 0;
   double this_time = float(millis()-init_time)/1000;
-  lcd.setCursor(8,0); lcd.print(String(this_time));
-  delay(1000);
-  eeprom_update(myName,this_time);
+  lcd.setCursor(6,0); lcd.print(String(this_time)+"s");
+  lcd.setCursor(0,1); lcd.print("      [OK]      ");
+  create_hearts();
+  while(digitalRead(BTN2)==HIGH);
+    
+  int i = eeprom_update(myName, this_time);
+  Serial.println(String(i));
+  print_scores(9-i);
 }
 
 void set_thistime(){
@@ -177,13 +182,70 @@ void set_thistime(){
 }
 
 void print_timebar(int passed) {
-    int requested = this_time * fraction/12;
-    int diff = abs(passed - requested);
-    if(diff<30)
-    {
-      lcd.write('-');
-       fraction++;   
-    }
+  int requested = this_time * fraction/12;
+  int diff = abs(passed - requested);
+  if(diff<30)
+  {
+    lcd.write('-');
+    fraction++;   
+  }
+}
+
+void print_scores(int j){
+  Serial.println("param:"+String(j));
+  lcd.clear();
+  String results[10] = {};
+  int start[10] = {};
+  String up;
+  for(int i = 10; i>0; i--)
+  {
+      up = "";
+      up += String(11-i)+"."; 
+      up += eeprom_readname(i-1) + " ";
+      up += String(eeprom_readvalue(i-1));
+      results[10-i] = up;
+      start[10-i] = (16-up.length())/2;
+  }
+  Serial.println("start");
+  for(int i= 0; i<10; i++)
+  {
+    Serial.println(results[i]);
+  }
+  Serial.println("end");
+  for(int i=0; i<10;i++)
+  {
+        lcd.clear();
+        lcd.setCursor(start[i],0);
+        lcd.print(results[i]); 
+        
+        if(i == j){
+          lcd.setCursor(0,0); 
+          if(i == 0){
+            lcd.write(byte(5));
+            lcd.setCursor(15,0);
+            lcd.write(byte(5));
+            sound_life();
+          }
+          else{
+            lcd.setCursor(0,0);
+            lcd.print(">");
+            lcd.setCursor(15,0);
+            lcd.write("<");
+          }
+        }
+    
+        if(i+1 == j){
+          lcd.setCursor(0,1);
+          lcd.print(">              <");
+        }
+        lcd.setCursor(start[i+1],1);
+        lcd.print(results[i+1]);
+        delay(DELAYPHASE);
+  }
+  lcd.setCursor(6,1); lcd.print("[OK]");
+  
+  while(digitalRead(BTN2)==HIGH);
+  while(digitalRead(BTN2)==LOW); 
 }
 
 void game_countdown()
@@ -234,6 +296,7 @@ void create_chars(){
   lcd.createChar(2,noHeart);  
   lcd.createChar(3,item1);
   lcd.createChar(4,item2);
+  lcd.createChar(5,crown);
 }
 
 void print_bar(){
@@ -242,6 +305,7 @@ void print_bar(){
   lcd.setCursor(0,1); lcd.print("[-]");
   lcd.setCursor(13,1); lcd.print("[+]");
 }
+
 
 void intro(){
   print_title();
@@ -267,9 +331,9 @@ void print_title()
     lcd.clear();
     delay(DELAYSHORT);
     
-    String up = "Whack-a-", down = " Mole!";
+    String up = "Whack-a-", low = "Smile!";
     lcd.setCursor(4,0); lcd.print(up);
-    lcd.setCursor(5,1); lcd.print(down);
+    lcd.setCursor(5,1); lcd.print(low);
     
     delay(DELAYSHORT);
   }
@@ -283,26 +347,30 @@ void hold_delay(){
   delay(DELAYBTN);
 }
 
+//SOUNDS
+
 void sound_yes(){
-  tone(BUZZ,1000,100);
-  delay(100);
-  tone(BUZZ,1500,100);
-  delay(100);
+  tone(BUZZ,1000,DELAYSHORT);
+  delay(DELAYSHORT);
+  tone(BUZZ,1500,DELAYSHORT);
+  delay(DELAYSHORT);
 }
 
 void sound_life(){
-  tone(BUZZ,1700,200);
-  delay(300);
-  tone(BUZZ,1700,70);
-  delay(90);
-  tone(BUZZ,1700,400);
+  tone(BUZZ,1700,2*DELAYSHORT);
+  delay(3*DELAYSHORT);
+  tone(BUZZ,1700,DELAYSHORTEST);
+  delay(DELAYSHORT);
+  tone(BUZZ,1700,4*DELAYSHORT);
 }
 
 void sound_lose(){
-   tone(BUZZ,200,100);
-   delay(200);
-   tone(BUZZ,50,100);
+  tone(BUZZ,200,DELAYSHORT);
+  delay(DELAYSHORT);
+  tone(BUZZ,50,DELAYSHORT);
 }
+
+//EEPROM
 
 void eeprom_write(String myName, double score, int pos){
     int address = 3*pos;
@@ -311,7 +379,7 @@ void eeprom_write(String myName, double score, int pos){
         EEPROM.write(address,myName[i]);
         address++;
     }
-    address = 12+sizeof(double)*pos;
+    address = 30+sizeof(double)*pos;
     EEPROM.put(address,score);    
 }
 
@@ -320,54 +388,32 @@ String eeprom_readname (int pos){
     String output = "";
     for(int i = 0; i<3;i++)
     {
-        output+=char(EEPROM.read(address));
+        output += char(EEPROM.read(address));
         address++;
     }
     return output;
 }
 
 double eeprom_readvalue(int pos){
-    int address = 12+sizeof(double)*pos;
+    int address = 30+sizeof(double)*pos;
     double output = 0;
     EEPROM.get(address,output);
     return output;
 }
 
-void eeprom_update(String myname, double value){
-    double scores[4];
-    String names[4];
-    for(int i=0;i<4;i++)
-    {   
-          scores[i] = eeprom_readvalue(i);
-          Serial.println(String(scores[i]));
-          names[i]= eeprom_readname(i);
-          Serial.println(String(names[i]));
-    }
-    int j=-1, pos=-1; bool done= false;
-    while (!done && j<3)
-    {
-        if(value<scores[j+1])
+int eeprom_update(String myname, double score){
+    int pos = -1; bool done = false;
+    while (!done && pos<10)
+    {        if(score<eeprom_readvalue(pos+1))
         {  done = true; }
-        else j++;
-    } pos = j;
-    Serial.println(String(pos));
-    Serial.println(String(value));
-    if(pos!=-1) {
-      for(int i = 1; i<=pos; i++)
-      {
-          scores[i-1] = scores[i];
-          names[i-1] = names[i];
-      }
-      scores[pos] = value;  names[pos] = myname;
-      for(int i=0;i<4;i++)
-      {   
-          Serial.println(String(scores[i]));
-          Serial.println(String(names[i]));
-      }
-    while(1);
-      for(int i =0; i<4; i++)
-      {   
-         eeprom_write(names[i],scores[i],i);
-      }
-   }
+        else pos++;
+    } 
+    for(int i = 1; i<=pos; i++)
+    {
+      String _name = eeprom_readname(i);
+      double _score = eeprom_readvalue(i);   
+      eeprom_write(_name,_score,i-1);
+    }
+   eeprom_write(myname,score,pos);
+   return pos;  
 }
